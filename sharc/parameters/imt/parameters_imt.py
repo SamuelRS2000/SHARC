@@ -25,7 +25,8 @@ class ParametersImt(ParametersBase):
     # This parameters has effect **only** when the IMT system is the interferer and the link is downlink.
     # If this is set to True, the intra SINR calculation will not be performed
     imt_dl_intra_sinr_calculation_disabled: bool = False
-
+    
+    use_two_rays: bool = False
     minimum_separation_distance_bs_ue: float = 0.0
     interfered_with: bool = False
     frequency: float = 24350.0

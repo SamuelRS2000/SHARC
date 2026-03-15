@@ -130,6 +130,9 @@ class Simulation(ABC, Observable):
         self.num_rb_per_ue = 0
 
         self.results = None
+        
+        #If this attribute is not defined, it remains as None.
+        self.use_two_rays = getattr(self.parameters.imt, "use_two_rays", None)
 
         imt_min_freq = self.parameters.imt.frequency - self.parameters.imt.bandwidth / 2
         imt_max_freq = self.parameters.imt.frequency + self.parameters.imt.bandwidth / 2
@@ -595,21 +598,52 @@ class Simulation(ABC, Observable):
         gains = np.zeros(phi.shape)
         if station_1.station_type is StationType.IMT_BS and not station_2.is_imt_station():
             off_axis_angle = station_1.get_off_axis_angle(station_2)
-            for k in station_1_active:
-                for b in range(
-                    k * self.parameters.imt.ue.k,
-                        (k + 1) * self.parameters.imt.ue.k):
-                    gains[b,
-                          station_2_active] = station_1.antenna[k].calculate_gain(phi_vec=phi[b,
-                                                                                              station_2_active],
-                                                                                  theta_vec=theta[b,
-                                                                                                  station_2_active,
-                                                                                                  ],
-                                                                                  beams_l=np.repeat(beams_idx[b],
-                                                                                                    len(station_2_active)),
-                                                                                  co_channel=c_channel,
-                                                                                  off_axis_angle_vec=off_axis_angle[k,
-                                                                                                                    station_2_active])
+            
+            # Check if the Two-Ray model flag is active (using defensive getattr)
+            if getattr(self, "use_two_rays", None) is True:
+                gains_1ray = np.zeros(phi.shape)
+                gains2_reflected = np.zeros(phi.shape)
+
+                for k in station_1_active:
+                    for b in range(k * self.parameters.imt.ue.k, (k + 1) * self.parameters.imt.ue.k):
+                        # Direct Ray gain calculation
+                        gains_1ray[b, station_2_active] = station_1.antenna[k].calculate_gain(
+                            phi_vec=phi[b, station_2_active],
+                            theta_vec=theta[b, station_2_active],
+                            beams_l=np.repeat(beams_idx[b], len(station_2_active)),
+                            co_channel=c_channel,
+                            off_axis_angle_vec=off_axis_angle[k, station_2_active])
+                        
+                        # Reflected Ray calculation (simulating reflection using 180-theta)
+                        # A random positive value with normal distribution (mean=17, variance=6^2)
+                        beta_gaussian = np.maximum(0, np.random.normal(loc=17, scale=6, size=1))
+                        
+                        gains2_reflected[b, station_2_active] = station_1.antenna[k].calculate_gain(
+                            phi_vec=phi[b, station_2_active],
+                            theta_vec=180 - theta[b, station_2_active],
+                            beams_l=np.repeat(beams_idx[b], len(station_2_active)),
+                            co_channel=c_channel,
+                            off_axis_angle_vec=off_axis_angle[k, station_2_active]) - beta_gaussian
+                        
+                        # Linear sum of powers to obtain the total Two-Ray gain
+                        gains[b, station_2_active] = 10 * np.log10(
+                            10**(gains_1ray[b, station_2_active] / 10) + 
+                            10**(gains2_reflected[b, station_2_active] / 10)
+                        )         
+                #Returns gains 2 rays
+                return gains
+            
+            else:
+                # Standard Single Ray logic (Original SHARC implementation)
+                for k in station_1_active:
+                    for b in range(k * self.parameters.imt.ue.k, (k + 1) * self.parameters.imt.ue.k):
+                        gains[b, station_2_active] = station_1.antenna[k].calculate_gain(
+                            phi_vec=phi[b, station_2_active],
+                            theta_vec=theta[b, station_2_active],
+                            beams_l=np.repeat(beams_idx[b], len(station_2_active)),
+                            co_channel=c_channel,
+                            off_axis_angle_vec=off_axis_angle[k, station_2_active])
+                return gains
 
         elif station_1.station_type is StationType.IMT_UE and not station_2.is_imt_station():
             off_axis_angle = station_1.get_off_axis_angle(station_2)
